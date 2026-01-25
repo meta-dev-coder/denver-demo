@@ -74,6 +74,46 @@ def train_surrogate(df):
     model_loss = RandomForestRegressor(n_estimators=50).fit(X, y_loss)
     return model_depth, model_loss
 
+# --- NEW: AGENTIC INTENT PARSER ---
+def parse_scenario_intent(user_input):
+    """Uses LLM to turn text into slider values"""
+    prompt = f"""
+    Convert this user request into a JSON scenario object for a flood simulator.
+    User Request: "{user_input}"
+    Rules:
+    - Year: between 2006 and 2026.
+    - Month: 1 to 12. or in Jan-Dec or January-December format.
+    - Rainfall_In: 0.0 to 8.0. can be in inches or "inch" format.
+    - Target: "Depth" or "Loss".
+    Return ONLY JSON: {{"year": 2026, "month": 6, "rain": 4.5, "target": "Loss"}}
+    """
+    if "current_model_idx" not in st.session_state:
+        st.session_state.current_model_idx = 0
+    import json
+    for i in range(st.session_state.current_model_idx, len(MODEL_LIST)):
+        selected_model = MODEL_LIST[i]
+
+        with st.spinner(f"Analyzing with {selected_model}..."):
+            try:
+                result = get_llm_response(user_query, selected_model)
+                # st.success(f"Generated using: {selected_model}")
+                # st.markdown(result)
+                success = True
+                break # Exit loop on success
+
+            except exceptions.ResourceExhausted:
+                st.warning(f"Quota exhausted for {selected_model}. Switching to backup...")
+                st.session_state.current_model_idx = i + 1 # Permanently switch for this session
+                continue # Try the next model in the list
+
+    if not success:
+        st.error("All available model quotas are currently exhausted. Please try again in 1 minute.")
+    # model = genai.GenerativeModel(MODEL_NAME)
+    # response = model.generate_content(prompt)
+    try:
+        return json.loads(result.strip().replace('```json', '').replace('```', ''))
+    except:
+        return None
 
 df = None
 df_flood = None
@@ -168,8 +208,52 @@ elif app_mode == "LLM Policy Advisor":
             st.error("All available model quotas are currently exhausted. Please try again in 1 minute.")
 # --- NEW PAGE: FLOOD RESILIENCE SIMULATION ---
 elif app_mode == "Flood Resilience Simulation":
-    st.title("🌊 Denver Flood Resilience Simulator")
+    st.title("🌊Denver Flood Resilience Agentic Digital Twin")
+    # --- UI IMPLEMENTATION ---
+    # st.title("🏙️ Agentic Digital Twin: Natural Language Simulation")
+    GOLD_PROMPTS = {
+        "Select a Scenario": "",
+        "Equity-First Analysis": "Simulate a 3-inch rainfall in May. Focus on neighborhoods with high SVI (Social Vulnerability Index) like Elyria-Swansea. How does low canopy cover exacerbate flood depth there?",
+        "Economic Risk Mitigation": "Model a 100-year storm event (5.5 inches) in July 2026. Calculate total property loss for high-value areas like Cherry Creek and suggest where new drainage infrastructure is most cost-effective.",
+        "Green Infrastructure Impact": "Compare current flood depths in Five Points during a standard 2-inch rain vs. a hypothetical scenario where canopy cover is increased to 25%. Predict the reduction in surface runoff.",
+        "Emergency Response Planning": "Simulate a flash flood in August 2024 with 4.5 inches of rain. Identify which neighborhoods will reach critical inundation levels (>0.5m) first to prioritize evacuation routes."
+    }
+    st.subheader("📝 Policy Scenario Configuration")
+    col_pre, col_edit = st.columns([1, 2])
 
+    with col_pre:
+        # Pre-select good prompts based on RFP goals
+        selected_template = st.selectbox("RFP Reference Scenarios", list(GOLD_PROMPTS.keys()))
+
+    with col_edit:
+        # User can modify the template or write from scratch
+        default_text = GOLD_PROMPTS.get(selected_template, "")
+        user_query = st.text_area("Refine Scenario Details", value=default_text, height=100,
+                                  placeholder="Describe your simulation goal here...")
+    # Step 1: User Input
+    # user_query = st.text_input("What scenario would you like to explore?",
+    #                            placeholder="e.g., 'A 100-year storm in 2026 during the May snowmelt peak'")
+
+    if user_query:
+        with st.spinner("Interpreting scenario..."):
+            params = parse_scenario_intent(user_query)
+            if params:
+                # Sync parameters to session state to drive the sliders
+                st.session_state.year_val = params.get('year', 2026)
+                st.session_state.month_val = params.get('month', 5)
+                st.session_state.rain_val = params.get('rain', 3.0)
+                st.session_state.target_val = "Property Loss ($)" if params.get('target') == "Loss" else "Flood Depth (m)"
+
+    # Step 2: Controls (Sync'd with AI intent)
+    with st.expander("Adjust Parameters & View Prompt Details", expanded=False):
+        c1, c2, c3 = st.columns(3)
+        year = c1.slider("Year", 2006, 2026, key="year_val", value=st.session_state.get("year_val", 2026))
+        month = c2.slider("Month", 1, 12, key="month_val", value=st.session_state.get("month_val", 5))
+        rain = c3.slider("Rainfall (Inches)", 0.0, 8.0, key="rain_val", value=st.session_state.get("rain_val", 3.0))
+        target_var = st.radio("Focus Metric", ["Flood Depth (m)", "Property Loss ($)"], key="target_val", horizontal=True)
+
+    # Step 3: Run Simulation & Visualization
+    st.subheader("Simulated Impacts")
     # REFERENCE PROMPTS (Two-Way Sync)
     scenarios = {
         "Manual Configuration": None,
@@ -178,25 +262,25 @@ elif app_mode == "Flood Resilience Simulation":
         "Scenario C: Extreme Monsoonal Flash Flood": {"year": 2026, "month": 8, "rain": 6.2}
     }
 
-    selected_ref = st.selectbox("Select a Scenario Reference", list(scenarios.keys()))
+    # selected_ref = st.selectbox("Select a Scenario Reference", list(scenarios.keys()))
 
-    # Update Session State based on selection
-    if scenarios[selected_ref]:
-        st.session_state.year_val = scenarios[selected_ref]['year']
-        st.session_state.month_val = scenarios[selected_ref]['month']
-        st.session_state.rain_val = scenarios[selected_ref]['rain']
+    # # Update Session State based on selection
+    # if scenarios[selected_ref]:
+    #     st.session_state.year_val = scenarios[selected_ref]['year']
+    #     st.session_state.month_val = scenarios[selected_ref]['month']
+    #     st.session_state.rain_val = scenarios[selected_ref]['rain']
 
     # Parameter Sliders
-    c1, c2, c3 = st.columns(3)
-    year = c1.slider("Simulation Year", 2006, 2026, key="year_val")
-    month = c2.slider("Month", 1, 12, key="month_val")
-    rain = c3.slider("Rainfall Intensity (Inches)", 0.0, 8.0, key="rain_val")
+    # c1, c2, c3 = st.columns(3)
+    # year = c1.slider("Simulation Year", 2006, 2026, key="year_val")
+    # month = c2.slider("Month", 1, 12, key="month_val")
+    # rain = c3.slider("Rainfall Intensity (Inches)", 0.0, 8.0, key="rain_val")
 
     # Target Selector
-    target_var = st.radio("Primary Target Metric", ["Flood Depth (m)", "Property Loss ($)"], horizontal=True)
+    # target_var = st.radio("Primary Target Metric", ["Flood Depth (m)", "Property Loss ($)"], horizontal=True)
 
     # 4. SIMULATION RESULTS
-    st.subheader("Interactive Impact Analysis")
+    # st.subheader("Interactive Impact Analysis")
 
     # Run Inference for all neighborhoods
     viz_data = []
@@ -219,55 +303,55 @@ elif app_mode == "Flood Resilience Simulation":
 
     # with col_text:
     st.write("### 🤖 SDNA-LLM Narrative")
-    if st.button("Generate Narrative Report"):
-        # prompt = f"""
-        #     Analyze this Denver flood scenario:
-        #     - Year: {year}, Month: {month}, Rain: {rain} inches.
-        #     - Impact: {res_df.to_dict()}
-        #     Focus on equity (SVI) and identify which neighborhoods need priority infrastructure in less than 500 words.
-        #     """
+    # if st.button("Generate Narrative Report"):
+    # prompt = f"""
+    #     Analyze this Denver flood scenario:
+    #     - Year: {year}, Month: {month}, Rain: {rain} inches.
+    #     - Impact: {res_df.to_dict()}
+    #     Focus on equity (SVI) and identify which neighborhoods need priority infrastructure in less than 500 words.
+    #     """
 
-        # 1. DYNAMIC CONTEXT BUILDING
-        # Tell the LLM exactly what the user is looking at.
-        focus_area = "economic impact and property loss" if "Property Loss" in target_var else "physical flood depth and hydrology"
+    # 1. DYNAMIC CONTEXT BUILDING
+    # Tell the LLM exactly what the user is looking at.
+    focus_area = "economic impact and property loss" if "Property Loss" in target_var else "physical flood depth and hydrology"
 
-        # Convert the top results into a string for the LLM to read
-        top_impacts = res_df.sort_values(by="Depth_m" if "Depth" in target_var else "Loss_USD", ascending=False).to_string()
+    # Convert the top results into a string for the LLM to read
+    top_impacts = res_df.sort_values(by="Depth_m" if "Depth" in target_var else "Loss_USD", ascending=False).to_string()
 
-        # 2. THE DYNAMIC PROMPT
-        prompt = f"""
-        You are a Denver City Policy Advisor. Analyze this SPECIFIC user-generated scenario:
-        - FOCUS AREA: {focus_area}
-        - PARAMETERS: {year}-{month} with {rain} inches of rainfall.
-        - DATA RESULTS:
-        {top_impacts}
-        
-        INSTRUCTIONS:
-        1. Explicitly address the '{target_var}' results shown in the chart.
-        2. Identify the neighborhood with the highest {target_var}.
-        3. Explain the correlation between Canopy ({res_df['Canopy'].mean()}% avg) and the results.
-        4. Briefly mention how SVI (Social Vulnerability) creates a 'double burden' for the high-risk areas identified.
-        """
+    # 2. THE DYNAMIC PROMPT
+    prompt = f"""
+    You are a Denver City Policy Advisor. Analyze this SPECIFIC user-generated scenario:
+    - FOCUS AREA: {focus_area}
+    - PARAMETERS: {year}-{month} with {rain} inches of rainfall.
+    - DATA RESULTS:
+    {top_impacts}
+    
+    INSTRUCTIONS:
+    1. Explicitly address the '{target_var}' results shown in the chart.
+    2. Identify the neighborhood with the highest {target_var}.
+    3. Explain the correlation between Canopy ({res_df['Canopy'].mean()}% avg) and the results.
+    4. Briefly mention how SVI (Social Vulnerability) creates a 'double burden' for the high-risk areas identified.
+    """
 
-        for i in range(st.session_state.current_model_idx, len(MODEL_LIST)):
-            selected_model = MODEL_LIST[i]
+    for i in range(st.session_state.current_model_idx, len(MODEL_LIST)):
+        selected_model = MODEL_LIST[i]
 
-            with st.spinner(f"Analyzing with {selected_model}..."):
-                try:
-                    result = get_llm_response(prompt, selected_model)
-                    st.success(f"Generated using: {selected_model}")
-                    st.markdown(result)
-                    success = True
-                    break # Exit loop on success
+        with st.spinner(f"Analyzing with {selected_model}..."):
+            try:
+                result = get_llm_response(prompt, selected_model)
+                st.success(f"Generated using: {selected_model}")
+                st.markdown(result)
+                success = True
+                break # Exit loop on success
 
-                except exceptions.ResourceExhausted:
-                    st.warning(f"Quota exhausted for {selected_model}. Switching to backup...")
-                    st.session_state.current_model_idx = i + 1 # Permanently switch for this session
-                    continue # Try the next model in the list
+            except exceptions.ResourceExhausted:
+                st.warning(f"Quota exhausted for {selected_model}. Switching to backup...")
+                st.session_state.current_model_idx = i + 1 # Permanently switch for this session
+                continue # Try the next model in the list
 
-        if not success:
-            st.error("All available model quotas are currently exhausted. Please try again in 1 minute.")
-        # st.info(result)
+    if not success:
+        st.error("All available model quotas are currently exhausted. Please try again in 1 minute.")
+    # st.info(result)
 # --- OVERVIEW ---
 else:
     st.title("🏙️ Denver Digital Twin: Task 2 & 3 Demo")
