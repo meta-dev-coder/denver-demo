@@ -133,14 +133,110 @@ with st.sidebar:
     st.subheader("Denver Digital Twin Demo")
     st.info("User: Policy Analyst\nRole: Decision Support")
     app_mode = st.selectbox("Scenario Mode",
-                            ["Overview",
+                            [
+                             "Storm Network Simulation",
                              "Flood Resilience Simulation",
                              "Heat/Canopy Simulation",
                              "LLM Policy Advisor",
-                             "Electrification ML",])
+                             "Electrification ML",
+                                "Overview"])
 
 if "current_model_idx" not in st.session_state:
     st.session_state.current_model_idx = 0
+
+# --- NEW MODE: STORM NETWORK SIMULATION ---
+if app_mode == "Storm Network Simulation":
+    st.header("🌊 Storm Sewer Hydraulic Twin")
+    st.write("Mapping street-level rain to underground pipe capacity.")
+
+    # 1. Agentic Prompting
+    user_query = st.text_area("Describe a storm scenario:",
+                              placeholder="Simulate a 4-inch flash flood in North Denver...")
+
+    # 2. Controls
+    c1, c2 = st.columns(2)
+    runoff_c = c1.slider("Surface Runoff Coefficient (C)", 0.1, 0.95, 0.3,
+                         help="0.9 = Concrete/Urban, 0.3 = Parks/Green Space")
+    rain_i = c2.slider("Rainfall Intensity (Inches/Hr)", 0.0, 8.0, 1.0)
+
+    # 3. Execution
+
+    # --- METHODOLOGY SECTION ---
+    with st.expander("📘 How it Works: Methodology & Mathematics"):
+        st.markdown(r"""
+        ### 1. The Rational Method (Surface Runoff)
+        We calculate the peak flow ($Q$) entering each inlet based on the surface characteristics of its parent drainage basin:
+        $$Q = C \cdot i \cdot A$$
+        - **C**: Runoff Coefficient (User-defined via slider)
+        - **i**: Rainfall Intensity (Inches/Hour)
+        - **A**: Basin Area (Acres)
+
+        ### 2. Manning’s Equation (Pipe Capacity)
+        The capacity of the underground network is determined by pipe geometry and friction:
+        $$V = \frac{1.486}{n} R_h^{2/3} S^{1/2} \quad \text{and} \quad Q_{cap} = A \cdot V$$
+        - **n**: Roughness coefficient (0.013 for Concrete)
+        - **Rh**: Hydraulic Radius ($D/4$ for full flow)
+        - **S**: Pipe Slope ($ft/ft$)
+        """)
+
+    if st.button("Run Network Simulation"):
+        import data_engine as de
+        import llm_engine as le
+        import sim_engine as se
+        # Load datasets (mains, inlets, mapping)
+        mains, mapping, basins = de.load_storm_network_data()
+
+        # Build and Run
+        G = se.build_storm_graph(mains)
+        results_df = se.run_network_simulation(G, rain_i, runoff_c, mapping, basins)
+
+
+        # UI Strategy for 34k records: Visualization over Tables
+        st.subheader("System Performance")
+
+        # Get Summary Data
+        total_p, total_s, top_10 = se.get_simulation_summary(results_df)
+
+        # --- DISPLAY TOTALS ---
+        st.subheader("📍 Global Network Impact")
+        m1, m2, m3 = st.columns(3)
+        m1.metric("Total Pipes Analyzed", f"{total_p:,}")
+        m2.metric("Total Surcharged Pipes", f"{total_s:,}", delta=f"{(total_s/total_p)*100:.1f}%", delta_color="inverse")
+        m3.metric("System Health", f"{((total_p - total_s) / total_p)*100:.1f}%")
+
+        # --- DISPLAY TOP 10 ---
+        st.write("---")
+        st.subheader("🔝 Top 10 Most Impacted Basins")
+
+        col_chart, col_table = st.columns([2, 1])
+
+        with col_chart:
+            fig = px.bar(top_10, x='Basin', y='Surcharged_Count',
+                         title="Critical Basins (Surcharge Count)",
+                         color='Surcharged_Count', color_continuous_scale='Reds')
+            st.plotly_chart(fig, use_container_width=True)
+
+        with col_table:
+            st.dataframe(top_10, hide_index=True, use_container_width=True)
+
+        # AI Analysis: Only send the summary to avoid token limits
+        summary = se.get_llm_summary(results_df)
+        # 4. Visualization & Reporting
+        # Trigger LLM Explanation
+        analysis_prompt = f"Analyze these pipe bottlenecks: {summary}..."
+
+        if "current_model_idx" not in st.session_state:
+            st.session_state.current_model_idx = 0
+
+        for i in range(st.session_state.current_model_idx, len(MODEL_LIST)):
+            selected_model = MODEL_LIST[i]
+            try:
+                result = get_llm_response(analysis_prompt, selected_model)
+                st.info(result)
+            except (exceptions.ResourceExhausted, Exception):
+                st.session_state.current_model_idx = i + 1
+                continue
+
 
 # --- MODE 1: HEAT/CANOPY SIMULATION (ML) ---
 if app_mode == "Heat/Canopy Simulation":
@@ -353,14 +449,14 @@ elif app_mode == "Flood Resilience Simulation":
         st.error("All available model quotas are currently exhausted. Please try again in 1 minute.")
     # st.info(result)
 # --- OVERVIEW ---
-else:
-    st.title("🏙️ Denver Digital Twin: Task 2 & 3 Demo")
-    st.markdown("""
-    ### Technical Alignment:
-    - **Task 2 (Data):** Ingesting live ArcGIS CSVs from Denver Open Data.
-    - **Task 3 (ML):** Running a Tier 1 Random Forest Surrogate for UHI prediction.
-    - **Task 4 (Reporting):** Using Llama 3 for automated "Scenario Briefs".
-    """)
-    if df is not None:
-        st.dataframe(df.head(10))
+# else:
+#     st.title("🏙️ Denver Digital Twin: Task 2 & 3 Demo")
+#     st.markdown("""
+#     ### Technical Alignment:
+#     - **Task 2 (Data):** Ingesting live ArcGIS CSVs from Denver Open Data.
+#     - **Task 3 (ML):** Running a Tier 1 Random Forest Surrogate for UHI prediction.
+#     - **Task 4 (Reporting):** Using Llama 3 for automated "Scenario Briefs".
+#     """)
+#     if df is not None:
+#         st.dataframe(df.head(10))
 
