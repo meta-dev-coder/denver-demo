@@ -428,7 +428,7 @@ elif app_mode == "Flood Resilience Simulation":
     3. Explain the correlation between Canopy ({res_df['Canopy'].mean()}% avg) and the results.
     4. Briefly mention how SVI (Social Vulnerability) creates a 'double burden' for the high-risk areas identified.
     """
-
+    success = True
     for i in range(st.session_state.current_model_idx, len(MODEL_LIST)):
         selected_model = MODEL_LIST[i]
 
