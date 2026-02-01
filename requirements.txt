@@ -7,3 +7,5 @@ google-api-core
 google-generativeai
 geopandas
 networkx
+fastapi
+uvicorn
